@@ -4,7 +4,7 @@ import PropTypes from 'prop-types';
 import clsx from 'clsx';
 import { fade, withStyles } from '@material-ui/core/styles';
 import ButtonBase from '@material-ui/core/ButtonBase';
-import { setRef, withForwardedRef } from '@material-ui/core/utils';
+import { useForkRef } from '@material-ui/core/utils';
 import { clamp } from '@material-ui/lab/utils';
 
 export const styles = theme => {
@@ -244,187 +244,35 @@ export function defaultValueReducer(rawValue, props) {
   return Number(rawValue.toFixed(3));
 }
 
-class Slider extends React.Component {
-  state = {
-    currentState: 'initial',
-  };
+const Slider = React.forwardRef(function Slider(props, ref) {
+  const {
+    className: classNameProp,
+    classes,
+    component: Component,
+    thumb: thumbIcon,
+    disabled,
+    max,
+    min,
+    onChange,
+    onDragEnd,
+    onDragStart,
+    step,
+    theme,
+    value,
+    valueReducer,
+    vertical,
+    ...other
+  } = props;
 
-  jumpAnimationTimeoutId = -1;
+  const [currentState, setCurrentState] = React.useState('initial')
+  const touchId = React.useRef();
+  const jumpAnimationTimeoutId = React.useRef(-1);
 
-  touchId = undefined;
-
-  componentWillUnmount() {
-    document.body.removeEventListener('mouseenter', this.handleMouseEnter);
-    document.body.removeEventListener('mouseleave', this.handleMouseLeave);
-    document.body.removeEventListener('mousemove', this.handleMouseMove);
-    document.body.removeEventListener('mouseup', this.handleMouseUp);
-    clearTimeout(this.jumpAnimationTimeoutId);
-  }
-
-  static getDerivedStateFromProps(nextProps, prevState) {
-    if (nextProps.disabled) {
-      return { currentState: 'disabled' };
-    }
-
-    if (!nextProps.disabled && prevState.currentState === 'disabled') {
-      return { currentState: 'normal' };
-    }
-
-    return null;
-  }
-
-  handleKeyDown = event => {
-    const { min, max, value: currentValue } = this.props;
-
-    const onePercent = Math.abs((max - min) / 100);
-    const step = this.props.step || onePercent;
-    let value;
-
-    switch (event.key) {
-      case 'Home':
-        value = min;
-        break;
-      case 'End':
-        value = max;
-        break;
-      case 'PageUp':
-        value = currentValue + onePercent * 10;
-        break;
-      case 'PageDown':
-        value = currentValue - onePercent * 10;
-        break;
-      case 'ArrowRight':
-      case 'ArrowUp':
-        value = currentValue + step;
-        break;
-      case 'ArrowLeft':
-      case 'ArrowDown':
-        value = currentValue - step;
-        break;
-      default:
-        return;
-    }
-
-    event.preventDefault();
-
-    value = clamp(value, min, max);
-
-    this.emitChange(event, value);
-  };
-
-  handleFocus = () => {
-    this.setState({ currentState: 'focused' });
-  };
-
-  handleBlur = () => {
-    this.setState({ currentState: 'normal' });
-  };
-
-  handleClick = event => {
-    const value = this.calculateValueFromPercent(event);
-
-    this.emitChange(event, value, () => {
-      this.playJumpAnimation();
-    });
-  };
-
-  handleMouseEnter = event => {
-    // If the slider was being interacted with but the mouse went off the window
-    // and then re-entered while unclicked then end the interaction.
-    if (event.buttons === 0) {
-      this.handleDragEnd(event);
-    }
-  };
-
-  handleMouseLeave = event => {
-    // The mouse will have moved between the last mouse move event
-    // this mouse leave event
-    this.handleMouseMove(event);
-  };
-
-  handleTouchStart = event => {
-    event.preventDefault();
-    const touch = event.changedTouches.item(0);
-    if (touch != null) {
-      this.touchId = touch.identifier;
-    }
-    this.setState({ currentState: 'activated' });
-
-    const { onDragStart, valueReducer } = this.props;
-
-    const value = this.calculateValueFromPercent(event);
-    const newValue = valueReducer(value, this.props, event);
-    this.emitChange(event, value);
-
-    document.body.addEventListener('touchend', this.handleTouchEnd);
-
-    if (typeof onDragStart === 'function') {
-      onDragStart(event, newValue);
-    }
-  };
-
-  handleMouseDown = event => {
-    this.setState({ currentState: 'activated' });
-
-    const { onDragStart, valueReducer } = this.props;
-
-    const value = this.calculateValueFromPercent(event);
-    const newValue = valueReducer(value, this.props, event);
-
-    document.body.addEventListener('mouseenter', this.handleMouseEnter);
-    document.body.addEventListener('mouseleave', this.handleMouseLeave);
-    document.body.addEventListener('mousemove', this.handleMouseMove);
-    document.body.addEventListener('mouseup', this.handleMouseUp);
-
-    if (typeof onDragStart === 'function') {
-      onDragStart(event, newValue);
-    }
-  };
-
-  handleTouchEnd = event => {
-    if (this.touchId === undefined) {
-      this.handleMouseUp(event);
-    }
-
-    for (let i = 0; i < event.changedTouches.length; i += 1) {
-      const touch = event.changedTouches.item(i);
-      if (touch.identifier === this.touchId) {
-        this.handleMouseUp(event);
-        break;
-      }
-    }
-  };
-
-  handleMouseUp = event => {
-    this.handleDragEnd(event);
-  };
-
-  handleTouchMove = event => {
-    if (this.touchId === undefined) {
-      this.handleMouseMove(event);
-    }
-
-    for (let i = 0; i < event.changedTouches.length; i += 1) {
-      const touch = event.changedTouches.item(i);
-      if (touch.identifier === this.touchId) {
-        this.handleMouseMove(event);
-        break;
-      }
-    }
-  };
-
-  handleMouseMove = event => {
-    const value = this.calculateValueFromPercent(event);
-
-    this.emitChange(event, value);
-  };
-
-  handleRef = ref => {
-    setRef(this.props.innerRef, ref);
-
+  const containerRef = React.useRef();
+  const handleOwnRef = React.useCallback(newRef => {
     // #StrictMode ready
-    const nextContainer = ReactDOM.findDOMNode(ref);
-    const prevContainer = this.container;
+    const nextContainer = ReactDOM.findDOMNode(newRef);
+    const prevContainer = containerRef.current;
 
     if (prevContainer !== nextContainer) {
       if (prevContainer) {
@@ -437,33 +285,55 @@ class Slider extends React.Component {
       }
     }
 
-    this.container = nextContainer;
-  };
+    containerRef.current = nextContainer;
+  }, []);
+  const handleRef = useForkRef(ref, handleOwnRef);
 
-  handleDragEnd(event) {
-    const { onDragEnd, valueReducer } = this.props;
-
-    const value = this.calculateValueFromPercent(event);
-    const newValue = valueReducer(value, this.props, event);
-
-    this.setState({ currentState: 'normal' });
-
-    document.body.removeEventListener('mouseenter', this.handleMouseEnter);
-    document.body.removeEventListener('mouseleave', this.handleMouseLeave);
-    document.body.removeEventListener('mousemove', this.handleMouseMove);
-    document.body.removeEventListener('mouseup', this.handleMouseUp);
-    document.body.removeEventListener('touchend', this.handleTouchEnd);
-
-    if (typeof onDragEnd === 'function') {
-      onDragEnd(event, newValue);
+  React.useEffect(() => {
+    if (disabled) {
+      setCurrentState('disabled');
     }
+
+    if (!disabled && currentState === 'disabled') {
+      setCurrentState('normal');
+    }
+  }, [currentState, disabled]);
+
+  React.useEffect(() => {
+    if (currentState === 'jumped') {
+      clearTimeout(jumpAnimationTimeoutId.current);
+      jumpAnimationTimeoutId.current = setTimeout(() => {
+        setCurrentState('normal');
+      }, theme.transitions.duration.complex);
+    }
+    return () => {
+      clearTimeout(jumpAnimationTimeoutId.current);
+    };
+  }, [currentState, theme.transitions.duration.complex]);
+
+  const isReverted = () => {
+    return theme.direction === 'rtl';
   }
 
-  emitChange(event, rawValue, callback) {
-    const { onChange, value: previousValue, valueReducer } = this.props;
-    const newValue = valueReducer(rawValue, this.props, event);
+  const calculateValueFromPercent = (event) => {
+    const percent = calculatePercent(
+      containerRef.current,
+      event,
+      vertical,
+      isReverted(),
+      touchId.current,
+    );
+    return percentToValue(percent, min, max);
+  }
 
-    if (newValue !== null && newValue !== previousValue && typeof onChange === 'function') {
+  const playJumpAnimation = () => {
+    setCurrentState('jumped');
+  }
+
+  const emitChange = (event, rawValue, callback) => {
+    const newValue = valueReducer(rawValue, props, event);
+
+    if (newValue !== null && newValue !== value && typeof onChange === 'function') {
       onChange(event, newValue);
 
       if (typeof callback === 'function') {
@@ -472,10 +342,164 @@ class Slider extends React.Component {
     }
   }
 
-  calculateTrackPartStyles(percent) {
-    const { theme, vertical } = this.props;
-    const { currentState } = this.state;
+  const handleDragEnd = (event) => {
+    const newValue = calculateValueFromPercent(event);
+    const reducedValue = valueReducer(newValue, props, event);
 
+    setCurrentState('normal');
+    /* eslint-disable no-use-before-define */
+    document.body.removeEventListener('mouseenter', handleMouseEnter);
+    document.body.removeEventListener('mouseleave', handleMouseLeave);
+    document.body.removeEventListener('mousemove', handleMouseMove);
+    document.body.removeEventListener('mouseup', handleMouseUp);
+    document.body.removeEventListener('touchend', handleTouchEnd);
+    /* eslint-enable no-use-before-define */
+    if (typeof onDragEnd === 'function') {
+      onDragEnd(event, reducedValue);
+    }
+  }
+
+  const handleMouseUp = event => {
+    handleDragEnd(event);
+  };
+
+  const handleMouseMove = event => {
+    const newValue = calculateValueFromPercent(event);
+
+    emitChange(event, newValue);
+  };
+
+  const handleKeyDown = event => {
+    const onePercent = Math.abs((max - min) / 100);
+    const stepOrOnePercent = step || onePercent;
+    let newValue;
+
+    switch (event.key) {
+      case 'Home':
+        newValue = min;
+        break;
+      case 'End':
+        newValue = max;
+        break;
+      case 'PageUp':
+        newValue = value + onePercent * 10;
+        break;
+      case 'PageDown':
+        newValue = value - onePercent * 10;
+        break;
+      case 'ArrowRight':
+      case 'ArrowUp':
+        newValue = value + stepOrOnePercent;
+        break;
+      case 'ArrowLeft':
+      case 'ArrowDown':
+        newValue = value - stepOrOnePercent;
+        break;
+      default:
+        return;
+    }
+
+    event.preventDefault();
+
+    newValue = clamp(newValue, min, max);
+
+    emitChange(event, newValue);
+  };
+
+  const handleFocus = () => {
+    setCurrentState('focused')
+  }
+
+  const handleBlur = () => {
+    setCurrentState('normal')
+  }
+
+  const handleClick = event => {
+    const newValue = calculateValueFromPercent(event);
+
+    emitChange(event, newValue, () => {
+      playJumpAnimation();
+    });
+  };
+
+  const handleMouseEnter = event => {
+    // If the slider was being interacted with but the mouse went off the window
+    // and then re-entered while unclicked then end the interaction.
+    if (event.buttons === 0) {
+      handleDragEnd(event);
+    }
+  };
+
+  const handleMouseLeave = event => {
+    // The mouse will have moved between the last mouse move event
+    // this mouse leave event
+    handleMouseMove(event);
+  };
+
+  const handleMouseDown = event => {
+    setCurrentState('activated');
+
+    const newValue = calculateValueFromPercent(event);
+    const reducedValue = valueReducer(newValue, props, event);
+
+    document.body.addEventListener('mouseenter', handleMouseEnter);
+    document.body.addEventListener('mouseleave', handleMouseLeave);
+    document.body.addEventListener('mousemove', handleMouseMove);
+    document.body.addEventListener('mouseup', handleMouseUp);
+
+    if (typeof onDragStart === 'function') {
+      onDragStart(event, reducedValue);
+    }
+  };
+
+  const handleTouchEnd = event => {
+    if (touchId.current === undefined) {
+      handleMouseUp(event);
+    }
+
+    for (let i = 0; i < event.changedTouches.length; i += 1) {
+      const touch = event.changedTouches.item(i);
+      if (touch.identifier === touchId.current) {
+        handleMouseUp(event);
+        break;
+      }
+    }
+  };
+
+  const handleTouchStart = event => {
+    event.preventDefault();
+    const touch = event.changedTouches.item(0);
+    if (touch != null) {
+      touchId.current = touch.identifier;
+    }
+    setCurrentState('activated');
+
+    const newValue = calculateValueFromPercent(event);
+    const reducedValue = valueReducer(newValue, props, event);
+    emitChange(event, newValue);
+
+    document.body.addEventListener('touchend', handleTouchEnd);
+
+    if (typeof onDragStart === 'function') {
+      onDragStart(event, reducedValue);
+    }
+  };
+
+  const handleTouchMove = event => {
+    if (touchId.current === undefined) {
+      handleMouseMove(event);
+    }
+
+    for (let i = 0; i < event.changedTouches.length; i += 1) {
+      const touch = event.changedTouches.item(i);
+      if (touch.identifier === touchId.current) {
+        handleMouseMove(event);
+        break;
+      }
+    }
+  };
+
+  const calculateTrackPartStyles = (percent) => {
     switch (currentState) {
       case 'disabled':
         return {
@@ -492,143 +516,105 @@ class Slider extends React.Component {
     }
   }
 
-  calculateValueFromPercent(event) {
-    const { min, max, vertical } = this.props;
-    const percent = calculatePercent(
-      this.container,
-      event,
-      vertical,
-      this.isReverted(),
-      this.touchId,
-    );
-    return percentToValue(percent, min, max);
-  }
+  React.useEffect(() => {
+    return () => {
+      document.body.removeEventListener('mouseenter', handleMouseEnter);
+      document.body.removeEventListener('mouseleave', handleMouseLeave);
+      document.body.removeEventListener('mousemove', handleMouseMove);
+      document.body.removeEventListener('mouseup', handleMouseUp);
+    };
+  }, []);
 
-  playJumpAnimation() {
-    this.setState({ currentState: 'jumped' }, () => {
-      clearTimeout(this.jumpAnimationTimeoutId);
-      this.jumpAnimationTimeoutId = setTimeout(() => {
-        this.setState({ currentState: 'normal' });
-      }, this.props.theme.transitions.duration.complex);
-    });
-  }
+  const percent = clamp(((value - min) * 100) / (max - min));
 
-  isReverted() {
-    return this.props.theme.direction === 'rtl';
-  }
+  const commonClasses = {
+    [classes.disabled]: disabled,
+    [classes.jumped]: !disabled && currentState === 'jumped',
+    [classes.focused]: !disabled && currentState === 'focused',
+    [classes.activated]: !disabled && currentState === 'activated',
+    [classes.vertical]: vertical,
+    [classes.rtl]: theme.direction === 'rtl',
+  };
 
-  render() {
-    const { currentState } = this.state;
-    const {
-      className: classNameProp,
-      classes,
-      component: Component,
-      thumb: thumbIcon,
-      disabled,
-      innerRef,
-      max,
-      min,
-      onChange,
-      onDragEnd,
-      onDragStart,
-      step,
-      theme,
-      value,
-      valueReducer,
-      vertical,
-      ...other
-    } = this.props;
-
-    const percent = clamp(((value - min) * 100) / (max - min));
-
-    const commonClasses = {
+  const className = clsx(
+    classes.root,
+    {
+      [classes.vertical]: vertical,
       [classes.disabled]: disabled,
-      [classes.jumped]: !disabled && currentState === 'jumped',
-      [classes.focused]: !disabled && currentState === 'focused',
-      [classes.activated]: !disabled && currentState === 'activated',
-      [classes.vertical]: vertical,
-      [classes.rtl]: theme.direction === 'rtl',
-    };
+    },
+    classNameProp,
+  );
 
-    const className = clsx(
-      classes.root,
-      {
-        [classes.vertical]: vertical,
-        [classes.disabled]: disabled,
-      },
-      classNameProp,
-    );
+  const containerClasses = clsx(classes.container, {
+    [classes.vertical]: vertical,
+  });
 
-    const containerClasses = clsx(classes.container, {
-      [classes.vertical]: vertical,
-    });
+  const trackBeforeClasses = clsx(classes.track, classes.trackBefore, commonClasses);
+  const trackAfterClasses = clsx(classes.track, classes.trackAfter, commonClasses);
 
-    const trackBeforeClasses = clsx(classes.track, classes.trackBefore, commonClasses);
-    const trackAfterClasses = clsx(classes.track, classes.trackAfter, commonClasses);
+  const thumbTransformFunction = vertical ? 'translateY' : 'translateX';
+  const thumbDirectionInverted = vertical || theme.direction === 'rtl';
+  const inlineTrackBeforeStyles = calculateTrackPartStyles(percent);
+  const inlineTrackAfterStyles = calculateTrackPartStyles(100 - percent);
+  const inlineThumbStyles = {
+    transform: `${thumbTransformFunction}(${thumbDirectionInverted ? 100 - percent : percent}%)`,
+  };
 
-    const thumbTransformFunction = vertical ? 'translateY' : 'translateX';
-    const thumbDirectionInverted = vertical || theme.direction === 'rtl';
-    const inlineTrackBeforeStyles = this.calculateTrackPartStyles(percent);
-    const inlineTrackAfterStyles = this.calculateTrackPartStyles(100 - percent);
-    const inlineThumbStyles = {
-      transform: `${thumbTransformFunction}(${thumbDirectionInverted ? 100 - percent : percent}%)`,
-    };
+  /** Start Thumb Icon Logic Here */
+  const ThumbIcon = thumbIcon
+    ? React.cloneElement(thumbIcon, {
+        ...thumbIcon.props,
+        className: clsx(thumbIcon.props.className, classes.thumbIcon),
+      })
+    : null;
+  /** End Thumb Icon Logic Here */
 
-    /** Start Thumb Icon Logic Here */
-    const ThumbIcon = thumbIcon
-      ? React.cloneElement(thumbIcon, {
-          ...thumbIcon.props,
-          className: clsx(thumbIcon.props.className, classes.thumbIcon),
-        })
-      : null;
-    /** End Thumb Icon Logic Here */
+  const thumbWrapperClasses = clsx(classes.thumbWrapper, commonClasses);
+  const thumbClasses = clsx(
+    classes.thumb,
+    {
+      [classes.thumbIconWrapper]: thumbIcon,
+    },
+    commonClasses,
+  );
 
-    const thumbWrapperClasses = clsx(classes.thumbWrapper, commonClasses);
-    const thumbClasses = clsx(
-      classes.thumb,
-      {
-        [classes.thumbIconWrapper]: thumbIcon,
-      },
-      commonClasses,
-    );
-
-    return (
-      <Component
-        className={className}
-        onClick={this.handleClick}
-        onMouseDown={this.handleMouseDown}
-        onTouchStartCapture={this.handleTouchStart}
-        onTouchMove={this.handleTouchMove}
-        ref={this.handleRef}
-        {...other}
-      >
-        <div className={containerClasses}>
-          <div className={trackBeforeClasses} style={inlineTrackBeforeStyles} />
-          <div className={thumbWrapperClasses} style={inlineThumbStyles}>
-            <ButtonBase
-              aria-valuenow={value}
-              aria-valuemin={min}
-              aria-valuemax={max}
-              aria-orientation={vertical ? 'vertical' : 'horizontal'}
-              className={thumbClasses}
-              disabled={disabled}
-              disableRipple
-              onBlur={this.handleBlur}
-              onKeyDown={this.handleKeyDown}
-              onTouchStartCapture={this.handleTouchStart}
-              onTouchMove={this.handleTouchMove}
-              onFocusVisible={this.handleFocus}
-              role="slider"
-            >
-              {ThumbIcon}
-            </ButtonBase>
-          </div>
-          <div className={trackAfterClasses} style={inlineTrackAfterStyles} />
+  return (
+    <Component
+      className={className}
+      onClick={handleClick}
+      onMouseDown={handleMouseDown}
+      onTouchStartCapture={handleTouchStart}
+      onTouchMove={handleTouchMove}
+      ref={handleRef}
+      {...other}
+    >
+      <div className={containerClasses}>
+        <div className={trackBeforeClasses} style={inlineTrackBeforeStyles} />
+        <div className={thumbWrapperClasses} style={inlineThumbStyles}>
+          <ButtonBase
+            aria-valuenow={value}
+            aria-valuemin={min}
+            aria-valuemax={max}
+            aria-orientation={vertical ? 'vertical' : 'horizontal'}
+            className={thumbClasses}
+            disabled={disabled}
+            disableRipple
+            onBlur={handleBlur}
+            onKeyDown={handleKeyDown}
+            onTouchStartCapture={handleTouchStart}
+            onTouchMove={handleTouchMove}
+            onFocusVisible={handleFocus}
+            role="slider"
+          >
+            {ThumbIcon}
+          </ButtonBase>
         </div>
-      </Component>
-    );
-  }
-}
+        <div className={trackAfterClasses} style={inlineTrackAfterStyles} />
+      </div>
+    </Component>
+  );
+})
+
 
 Slider.propTypes = {
   /**
@@ -649,11 +635,6 @@ Slider.propTypes = {
    * If `true`, the slider will be disabled.
    */
   disabled: PropTypes.bool,
-  /**
-   * @ignore
-   * from `withForwardRef`
-   */
-  innerRef: PropTypes.oneOfType([PropTypes.func, PropTypes.object]),
   /**
    * The maximum allowed value of the slider.
    * Should not be equal to min.
@@ -714,4 +695,4 @@ Slider.defaultProps = {
   valueReducer: defaultValueReducer,
 };
 
-export default withStyles(styles, { name: 'MuiSlider', withTheme: true })(withForwardedRef(Slider));
+export default withStyles(styles, { name: 'MuiSlider', withTheme: true })(Slider);
